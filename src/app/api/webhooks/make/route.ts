@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { PaymentStatus } from "@prisma/client"
 
 // POST /api/webhooks/make
 // Generic webhook endpoint for Make (Integromat) automations
@@ -177,7 +178,7 @@ async function handleCommissionSync(action: string, data: any) {
   const paymentData = {
     qbInvoiceId: data.qbInvoiceId,
     amount: data.amount,
-    status: data.paid ? "PAID" : "PENDING",
+    status: data.paid ? PaymentStatus.PAID : PaymentStatus.PENDING,
     datePaid: data.datePaid ? new Date(data.datePaid) : undefined,
   }
 

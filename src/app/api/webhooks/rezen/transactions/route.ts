@@ -126,11 +126,11 @@ async function upsertTransaction(data: any) {
   if (existingTx) {
     transaction = await prisma.transaction.update({
       where: { id: existingTx.id },
-      data: transactionData,
+      data: transactionData as any,
     })
   } else {
     transaction = await prisma.transaction.create({
-      data: transactionData,
+      data: transactionData as any,
     })
   }
 

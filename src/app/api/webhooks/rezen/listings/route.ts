@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
 
 async function upsertListing(data: any) {
   // Find the associated agent
-  let agentId = null
+  let agentId: string | undefined = undefined
   if (data.agentEmail || data.agentRezenId) {
     const agent = await prisma.agent.findFirst({
       where: {
@@ -137,13 +137,18 @@ async function upsertListing(data: any) {
   })
 
   if (existingListing) {
+    // For updates, exclude agentId and handle it separately  
+    const { agentId: _, ...updateData } = listingData
     await prisma.listing.update({
       where: { id: existingListing.id },
-      data: listingData,
+      data: {
+        ...updateData,
+        ...(agentId && { agent: { connect: { id: agentId } } }),
+      } as any,
     })
   } else {
     await prisma.listing.create({
-      data: listingData,
+      data: listingData as any,
     })
   }
 
