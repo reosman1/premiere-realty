@@ -79,9 +79,9 @@ model Agent {
   updatedAt DateTime @updatedAt
 
   // External IDs
-  zohoId    String? @unique
-  rezenId   String? @unique // REAL Participant ID
-  stripeId  String?
+  zohoId       String? @unique
+  rezenId      String? @unique // REAL Participant ID
+  stripeId     String?
   qbVendorId   String? // QuickBooks Vendor Number
   qbVendorName String? // QuickBooks Vendor Name
 
@@ -95,51 +95,51 @@ model Agent {
   avatarUrl     String?
 
   // Address
-  street   String?
-  city     String?
-  state    String?
-  zipcode  String?
-  county   String?
-  country  String?
+  street  String?
+  city    String?
+  state   String?
+  zipcode String?
+  county  String?
+  country String?
 
   // Professional Info
-  licenseNumber   String?
-  licenseExpiry   DateTime?
-  website         String?
-  
+  licenseNumber String?
+  licenseExpiry DateTime?
+  website       String?
+
   // Employment
-  status          AgentStatus @default(ACTIVE)
-  memberLevel     MemberLevel @default(ASSOCIATE)
-  hireDate        DateTime?
-  departureDate   DateTime?
+  status           AgentStatus @default(ACTIVE)
+  memberLevel      MemberLevel @default(ASSOCIATE)
+  hireDate         DateTime?
+  departureDate    DateTime?
   firstClosingDate DateTime?
   daysToFirstClose Int?
-  career          Career?
+  career           Career?
 
   // Commission Structure
   preCapSplitToAgent  Decimal? @default(75.00) @db.Decimal(5, 2) // Pre-cap split %
   postCapSplitToAgent Decimal? @default(95.00) @db.Decimal(5, 2) // Post-cap split %
-  perTransactionFee   Decimal? @db.Decimal(12, 2)  // Fee after capping
+  perTransactionFee   Decimal? @db.Decimal(12, 2) // Fee after capping
 
   // Cap Tracking - Team
-  teamCapAmount     Decimal? @default(20000.00) @db.Decimal(12, 2)
-  teamCapAmountPaid Decimal? @default(0) @db.Decimal(12, 2)
-  cappedWithTeam    Boolean  @default(false)
+  teamCapAmount       Decimal?  @default(20000.00) @db.Decimal(12, 2)
+  teamCapAmountPaid   Decimal?  @default(0) @db.Decimal(12, 2)
+  cappedWithTeam      Boolean   @default(false)
   teamAnniversaryDate DateTime?
   nextTeamAnniversary DateTime?
   lastAnniversaryDate DateTime?
 
   // Cap Tracking - Brokerage
-  brokerageCapAmount     Decimal? @db.Decimal(12, 2)
-  brokerageCapAmountPaid Decimal? @default(0) @db.Decimal(12, 2)
-  cappedWithBrokerage    Boolean  @default(false)
+  brokerageCapAmount       Decimal?  @db.Decimal(12, 2)
+  brokerageCapAmountPaid   Decimal?  @default(0) @db.Decimal(12, 2)
+  cappedWithBrokerage      Boolean   @default(false)
   brokerageAnniversaryDate DateTime?
 
   // Roles / Flags
-  isActiveSponsor     Boolean @default(false)
-  isActiveTeamLeader  Boolean @default(false)
-  isActiveDirector    Boolean @default(false)
-  isActiveMentor      Boolean @default(false)
+  isActiveSponsor      Boolean @default(false)
+  isActiveTeamLeader   Boolean @default(false)
+  isActiveDirector     Boolean @default(false)
+  isActiveMentor       Boolean @default(false)
   isActiveGrowthLeader Boolean @default(false)
   enrolledInMentorship Boolean @default(false)
 
@@ -148,11 +148,11 @@ model Agent {
   dealsAsMentee        Int?
 
   // Stats
-  dealsPriorToPG    Int? // Deals closed prior to joining
-  dealsWithPG       Int? // Deals closed with Premiere
-  monthsWithFirm    Int?
-  daysWithFirm      Int?
-  yearsWithFirm     Int?
+  dealsPriorToPG Int? // Deals closed prior to joining
+  dealsWithPG    Int? // Deals closed with Premiere
+  monthsWithFirm Int?
+  daysWithFirm   Int?
+  yearsWithFirm  Int?
 
   // Billing
   paysMonthlyMemberFee Boolean  @default(false)
@@ -177,9 +177,9 @@ model Agent {
   teamLeader   Agent?  @relation("TeamLeaderAgents", fields: [teamLeaderId], references: [id])
   teamMembers  Agent[] @relation("TeamLeaderAgents")
 
-  sponsorId        String?
-  sponsor          Agent?  @relation("SponsorAgents", fields: [sponsorId], references: [id])
-  sponsoredAgents  Agent[] @relation("SponsorAgents")
+  sponsorId       String?
+  sponsor         Agent?  @relation("SponsorAgents", fields: [sponsorId], references: [id])
+  sponsoredAgents Agent[] @relation("SponsorAgents")
 
   mentorId String?
   mentor   Agent?  @relation("MentorAgents", fields: [mentorId], references: [id])
@@ -194,11 +194,11 @@ model Agent {
   bizDevAgents          Agent[] @relation("BizDevAgents")
 
   // Related Records
-  user              User?
-  listings          Listing[]
-  transactions      Transaction[]
+  user               User?
+  listings           Listing[]
+  transactions       Transaction[]
   commissionPayments CommissionPayment[]
-  activityLogs      ActivityLog[]
+  activityLogs       ActivityLog[]
 
   @@index([status])
   @@index([email])
@@ -234,11 +234,11 @@ model Listing {
   updatedAt DateTime @updatedAt
 
   // External IDs
-  zohoId          String? @unique
-  rezenCode       String? // SS Listing Guid
-  rezenListingId  String? // SS Listing ID
-  mlsNumber       String?
-  fileId          String?
+  zohoId         String? @unique
+  rezenCode      String? // SS Listing Guid
+  rezenListingId String? // SS Listing ID
+  mlsNumber      String?
+  fileId         String?
 
   // Property Address
   streetNo   String?
@@ -255,7 +255,7 @@ model Listing {
   listingType  ListingType?
   propertyType String?
   yearBuilt    String?
-  
+
   // Pricing
   listingPrice Decimal? @db.Decimal(12, 2)
 
@@ -272,8 +272,8 @@ model Listing {
   expirationDate DateTime?
 
   // Status
-  stage  ListingStage @default(ACTIVE_LISTING)
-  status String?
+  stage     ListingStage @default(ACTIVE_LISTING)
+  status    String?
   checklist String?
 
   // Source & Office
@@ -289,8 +289,8 @@ model Listing {
   titleEscrowProvider String?
 
   // Links
-  rezenListingLink    String?
-  rezenDealLink       String?
+  rezenListingLink      String?
+  rezenDealLink         String?
   rezenAssociatedDealId String?
 
   // Relationships
@@ -342,9 +342,11 @@ model Transaction {
   updatedAt DateTime @updatedAt
 
   // External IDs
-  zohoId              String? @unique
-  brokerTransactionId String?
+  zohoId                String? @unique
+  rezenId               String? @unique // REZEN transaction ID (unique identifier)
+  brokerTransactionId   String?
   brokerTransactionCode String?
+  transactionCode       String? // REZEN transaction code
 
   // Transaction Info
   name   String
@@ -352,31 +354,53 @@ model Transaction {
   amount Decimal? @db.Decimal(12, 2) // Sale price
 
   // Type & Stage
-  type      TransactionType?
-  stage     TransactionStage @default(NEW_ENTRY)
-  status    String?
-  statusDetails String?
+  type           TransactionType?
+  stage          TransactionStage @default(NEW_ENTRY)
+  status         String?
+  statusDetails  String?
   brokerDealType BrokerDealType?
-  firmDeal  FirmDealStatus?
+  firmDeal       FirmDealStatus?
+  lifecycleState String? // REZEN lifecycle state (e.g., "NEW", "SETTLED", "CALCULATE_LEDGER")
 
   // Commission
-  commissionPct     Decimal? @db.Decimal(5, 3)
-  commissionFlatFee Decimal? @db.Decimal(12, 2)
-  grossCommissionGCI Decimal? @db.Decimal(12, 2)
-  firmAdminFee      Decimal? @db.Decimal(12, 2)
-  totalPayments     Decimal? @db.Decimal(12, 2)
+  commissionPct             Decimal? @db.Decimal(5, 3)
+  commissionFlatFee         Decimal? @db.Decimal(12, 2)
+  grossCommissionGCI        Decimal? @db.Decimal(12, 2)
+  grossCommissionAmount     Decimal? @db.Decimal(12, 2) // Gross commission amount from REZEN
+  grossCommissionPercentage Decimal? @db.Decimal(5, 2) // Gross commission percentage
+  agentSplitPercent         Decimal? @db.Decimal(5, 2) // Agent split percentage
+  brokerCompanyCommission   Decimal? @db.Decimal(12, 2) // Broker/Company commission
+  firmAdminFee              Decimal? @db.Decimal(12, 2)
+  totalPayments             Decimal? @db.Decimal(12, 2)
 
   // Dates
   contractAcceptanceDate DateTime?
   estimatedClosingDate   DateTime?
   actualClosingDate      DateTime?
 
-  // Payer Info
-  payerName    String?
-  payerEmail   String?
-  payerPhone   String?
-  payerCompany String?
-  payerRole    String?
+  // QuickBooks Integration
+  quickbooksId              String? // QB_ID
+  quickbooksTransactionName String? // QB_Transaction_Name
+  quickbooksInvoiceLink     String? // QB_Invoice_Link
+
+  // CD Payer Info (Title/Escrow)
+  cdPayerName           String? // Name of Title Entity Used
+  cdPayerBusinessEntity String? // Title and Escrow Provider
+  payerName             String?
+  payerEmail            String?
+  payerPhone            String?
+  payerCompany          String?
+  payerRole             String?
+
+  // Address (from REZEN)
+  addressOneLine      String? // Full address one line
+  streetAddress       String?
+  city                String?
+  state               String?
+  zipCode             String?
+  county              String?
+  country             String?
+  unitApartmentNumber String?
 
   // Flags
   personalDeal           Boolean @default(false)
@@ -384,11 +408,12 @@ model Transaction {
   haltSyncWithBroker     Boolean @default(false)
   haltSyncWithFirmAuto   Boolean @default(false)
   overrideAllAutomations Boolean @default(false)
+  disableSplitAutomation Boolean @default(false) // Disable Split Automation
 
   // Source
-  leadSource          String?
+  leadSource            String?
   transactionSupportRep String?
-  office              String?
+  office                String?
 
   // Links
   brokerListingLink     String?
@@ -411,6 +436,8 @@ model Transaction {
   @@index([stage])
   @@index([agentId])
   @@index([actualClosingDate])
+  @@index([rezenId])
+  @@index([lifecycleState])
 }
 
 enum TransactionType {
@@ -460,11 +487,11 @@ model TransactionParticipant {
   transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 
   agentId String?
-  
+
   participantName  String
   participantEmail String?
-  participantRole  String?  // Agent, Sponsor, Team Leader, etc.
-  
+  participantRole  String? // Agent, Sponsor, Team Leader, etc.
+
   paymentAmount Decimal? @db.Decimal(12, 2)
   paymentPct    Decimal? @db.Decimal(5, 2)
 
@@ -488,10 +515,10 @@ model CommissionPayment {
   agentId String?
   agent   Agent?  @relation(fields: [agentId], references: [id])
 
-  amount      Decimal? @db.Decimal(12, 2)
+  amount      Decimal?      @db.Decimal(12, 2)
   status      PaymentStatus @default(PENDING)
   paymentType String?
-  
+
   dateEarned DateTime?
   datePaid   DateTime?
 
@@ -555,6 +582,34 @@ model Contact {
 }
 
 // ============================================
+// FORMULA FIELDS
+// ============================================
+
+model FormulaField {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Field Identification
+  entityType  String // "Transaction", "Agent", "Listing", "CommissionPayment"
+  fieldName   String // Unique field name (e.g., "totalPayments", "grossCommissionGCI")
+  displayName String // Human-readable label
+
+  // Formula Definition
+  formulaExpression String @db.Text // The formula expression (e.g., "Amount * Commission / 100")
+  returnType        String // "currency", "number", "text", "date", "boolean"
+  decimalPlaces     Int?   @default(2) // For currency/number types
+
+  // Formula Metadata
+  description String? @db.Text
+  isActive    Boolean @default(true)
+
+  @@unique([entityType, fieldName])
+  @@index([entityType])
+  @@index([isActive])
+}
+
+// ============================================
 // SYNC LOGS (REZEN / Make Integration)
 // ============================================
 
@@ -562,14 +617,14 @@ model SyncLog {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
 
-  source     SyncSource
-  entityType String     // agent, listing, transaction
-  entityId   String?
-  externalId String?
-  action     SyncAction
-  payload    Json?
-  status     SyncStatus @default(PENDING)
-  errorMessage String?  @db.Text
+  source       SyncSource
+  entityType   String // agent, listing, transaction
+  entityId     String?
+  externalId   String?
+  action       SyncAction
+  payload      Json?
+  status       SyncStatus @default(PENDING)
+  errorMessage String?    @db.Text
 
   @@index([source, entityType])
   @@index([status])
@@ -604,9 +659,9 @@ model ActivityLog {
   createdAt DateTime @default(now())
 
   userId     String?
-  entityType String  // agent, listing, transaction
+  entityType String // agent, listing, transaction
   entityId   String
-  action     String  // created, updated, deleted, status_changed, etc.
+  action     String // created, updated, deleted, status_changed, etc.
   details    Json?
   ipAddress  String?
 
@@ -631,7 +686,7 @@ model OnboardingTask {
   updatedAt DateTime @updatedAt
 
   agentId String
-  
+
   taskName    String
   description String?
   dueDate     DateTime?

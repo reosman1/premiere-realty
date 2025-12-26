@@ -1,0 +1,173 @@
+import { NextRequest, NextResponse } from "next/server"
+import { getZohoAccessToken } from "@/lib/zoho-auth"
+
+const ZOHO_API_BASE = 'https://www.zohoapis.com/crm/v8'
+const MODULE_NAME = 'Team_Leaders'
+
+/**
+ * Fetch Team Leaders from Zoho
+ */
+async function fetchZohoTeamLeaders(accessToken: string, limit: number | null = null) {
+  const fields = [
+    'id', 'Name', 'Email', 'Firm_Status', 'Team_Leader_Percent',
+    'Regional_Director_Name', 'QB_Vendor_Number', 
+    'Effective_Start_Date_as_TL', 'Effective_End_Date',
+    'Owner', 'Created_Time', 'Modified_Time', 'Created_By', 'Modified_By',
+    'Last_Activity_Time', 'Email_Opt_Out', 'Record_Image'
+  ].join(',')
+
+  let allRecords: any[] = []
+  let pageToken: string | null = null
+  let pageCount = 0
+  const maxPages = limit ? Math.ceil(limit / 200) : 1000
+
+  do {
+    let url = `${ZOHO_API_BASE}/${MODULE_NAME}?fields=${fields}&per_page=200&sort_order=desc&sort_by=Created_Time`
+    if (pageToken) {
+      url += `&page_token=${pageToken}`
+    }
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Zoho-oauthtoken ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      let errorText = ''
+      try {
+        const errorData = await response.json()
+        errorText = JSON.stringify(errorData)
+      } catch {
+        errorText = await response.text()
+      }
+      throw new Error(`Zoho API error (${response.status} ${response.statusText}): ${errorText}`)
+    }
+
+    const data = await response.json()
+    
+    if (data.data && Array.isArray(data.data)) {
+      allRecords = allRecords.concat(data.data)
+      pageToken = data.info?.next_page_token || null
+      pageCount++
+      
+      if (limit && allRecords.length >= limit) {
+        break
+      }
+      
+      if (!pageToken) {
+        break
+      }
+    } else {
+      break
+    }
+  } while (pageToken && pageCount < maxPages)
+
+  return limit ? allRecords.slice(0, limit) : allRecords
+}
+
+/**
+ * GET /api/team-leaders
+ * Fetch Team Leaders from Zoho CRM
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const searchParams = request.nextUrl.searchParams
+    const search = searchParams.get("search") || ""
+    const status = searchParams.get("status")
+    const page = parseInt(searchParams.get("page") || "1", 10)
+    const pageSize = parseInt(searchParams.get("pageSize") || "25", 10)
+
+    // Get access token (cached to prevent rate limiting)
+    let accessToken: string
+    try {
+      accessToken = await getZohoAccessToken()
+    } catch (tokenError: any) {
+      console.error("Failed to get Zoho access token:", tokenError)
+      return NextResponse.json(
+        { 
+          error: "Failed to fetch team leaders", 
+          details: tokenError?.message || "Authentication failed",
+          message: tokenError?.message || "Authentication failed"
+        },
+        { status: 500 }
+      )
+    }
+
+    // Fetch all Team Leaders from Zoho
+    const allTeamLeaders = await fetchZohoTeamLeaders(accessToken)
+
+    // Transform and filter data
+    let filtered = allTeamLeaders.map((tl) => {
+      const regionalDirector = tl.Regional_Director_Name
+      const rdName = regionalDirector && typeof regionalDirector === 'object' 
+        ? (regionalDirector.name || regionalDirector.Name) 
+        : regionalDirector
+
+      return {
+        id: tl.id,
+        name: tl.Name || 'N/A',
+        email: tl.Email || null,
+        firmStatus: tl.Firm_Status || null,
+        teamLeaderPercent: tl.Team_Leader_Percent || null,
+        regionalDirector: rdName || null,
+        regionalDirectorId: regionalDirector && typeof regionalDirector === 'object' 
+          ? (regionalDirector.id || regionalDirector.Id) 
+          : null,
+        qbVendorNumber: tl.QB_Vendor_Number || null,
+        effectiveStartDate: tl.Effective_Start_Date_as_TL || null,
+        effectiveEndDate: tl.Effective_End_Date || null,
+        createdTime: tl.Created_Time || null,
+        modifiedTime: tl.Modified_Time || null,
+        owner: tl.Owner && typeof tl.Owner === 'object' ? tl.Owner.name : null,
+      }
+    })
+
+    // Apply search filter
+    if (search) {
+      const searchLower = search.toLowerCase()
+      filtered = filtered.filter((tl) => 
+        tl.name?.toLowerCase().includes(searchLower) ||
+        tl.email?.toLowerCase().includes(searchLower) ||
+        tl.regionalDirector?.toLowerCase().includes(searchLower)
+      )
+    }
+
+    // Apply status filter
+    if (status && status !== "all") {
+      filtered = filtered.filter((tl) => 
+        tl.firmStatus?.toLowerCase() === status.toLowerCase()
+      )
+    }
+
+    // Paginate
+    const total = filtered.length
+    const skip = (page - 1) * pageSize
+    const paginated = filtered.slice(skip, skip + pageSize)
+
+    return NextResponse.json({
+      teamLeaders: paginated,
+      pagination: {
+        total,
+        page,
+        pageSize,
+        totalPages: Math.ceil(total / pageSize),
+      },
+    })
+  } catch (error: any) {
+    console.error("Error fetching team leaders:", error)
+    const errorMessage = error?.message || "Unknown error"
+    
+    return NextResponse.json(
+      { 
+        error: "Failed to fetch team leaders", 
+        details: errorMessage,
+        message: errorMessage
+      },
+      { status: 500 }
+    )
+  }
+}
+

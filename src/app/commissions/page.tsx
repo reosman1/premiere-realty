@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import * as React from "react"
 import { 
   DollarSign, 
   Search, 
@@ -10,7 +11,8 @@ import {
   Calendar,
   CheckCircle,
   Clock,
-  MoreHorizontal
+  MoreHorizontal,
+  Loader2
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -27,76 +29,7 @@ import {
 import { Select } from "@/components/ui/select"
 import { Avatar } from "@/components/ui/avatar"
 import { formatCurrency, formatDate, getInitials } from "@/lib/utils"
-
-// Demo data
-const commissions = [
-  {
-    id: "1",
-    agent: "Sarah Johnson",
-    transaction: "123 Oak Street",
-    amount: 10125,
-    gci: 13500,
-    splitPct: 75,
-    status: "PAID",
-    datePaid: "2024-12-22",
-    qbInvoiceId: "INV-2024-0891",
-  },
-  {
-    id: "2",
-    agent: "Michael Chen",
-    transaction: "456 Maple Ave",
-    amount: 7031.25,
-    gci: 9375,
-    splitPct: 75,
-    status: "PENDING",
-    datePaid: null,
-    qbInvoiceId: "INV-2024-0892",
-  },
-  {
-    id: "3",
-    agent: "Emily Brown",
-    transaction: "789 Cedar Lane",
-    amount: 11812.50,
-    gci: 15750,
-    splitPct: 75,
-    status: "PENDING",
-    datePaid: null,
-    qbInvoiceId: null,
-  },
-  {
-    id: "4",
-    agent: "James Wilson",
-    transaction: "321 Pine Road",
-    amount: 6525,
-    gci: 8700,
-    splitPct: 75,
-    status: "PAID",
-    datePaid: "2024-12-20",
-    qbInvoiceId: "INV-2024-0889",
-  },
-  {
-    id: "5",
-    agent: "Sarah Johnson",
-    transaction: "555 Commerce St",
-    amount: 4275,
-    gci: 4500,
-    splitPct: 95,
-    status: "PAID",
-    datePaid: "2024-12-18",
-    qbInvoiceId: "INV-2024-0887",
-  },
-  {
-    id: "6",
-    agent: "Michael Chen",
-    transaction: "Referral - 999 Oak",
-    amount: 1875,
-    gci: 2500,
-    splitPct: 75,
-    status: "PAID",
-    datePaid: "2024-12-15",
-    qbInvoiceId: "INV-2024-0885",
-  },
-]
+import { useRouter } from "next/navigation"
 
 const statusOptions = [
   { value: "all", label: "All Statuses" },
@@ -105,28 +38,62 @@ const statusOptions = [
 ]
 
 export default function CommissionsPage() {
+  const router = useRouter()
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [pageSize, setPageSize] = useState(25)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [commissions, setCommissions] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
 
-  const filteredCommissions = commissions.filter((comm) => {
-    const matchesSearch =
-      comm.agent.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      comm.transaction.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      comm.qbInvoiceId?.toLowerCase().includes(searchQuery.toLowerCase())
+  // Fetch commissions from API
+  useEffect(() => {
+    const fetchCommissions = async () => {
+      setLoading(true)
+      try {
+        const params = new URLSearchParams({
+          page: currentPage.toString(),
+          pageSize: pageSize.toString(),
+        })
+        
+        if (searchQuery) params.append("search", searchQuery)
+        if (statusFilter !== "all") params.append("status", statusFilter)
 
-    const matchesStatus = statusFilter === "all" || comm.status === statusFilter
+        const response = await fetch(`/api/commissions?${params.toString()}`)
+        const data = await response.json()
 
-    return matchesSearch && matchesStatus
-  })
+        if (response.ok) {
+          setCommissions(data.commissions || [])
+          setTotal(data.pagination?.total || 0)
+          setTotalPages(data.pagination?.totalPages || 0)
+        } else {
+          console.error("Error fetching commission payments:", data.error)
+        }
+      } catch (error) {
+        console.error("Error fetching commission payments:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchCommissions()
+  }, [searchQuery, statusFilter, currentPage, pageSize])
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchQuery, statusFilter])
 
   const totalPaid = commissions
     .filter((c) => c.status === "PAID")
-    .reduce((sum, c) => sum + c.amount, 0)
+    .reduce((sum, c) => sum + (c.amount || 0), 0)
   const totalPending = commissions
     .filter((c) => c.status === "PENDING")
-    .reduce((sum, c) => sum + c.amount, 0)
-  const totalGCI = commissions.reduce((sum, c) => sum + c.gci, 0)
-  const avgCommission = totalGCI / commissions.length
+    .reduce((sum, c) => sum + (c.amount || 0), 0)
+  const totalGCI = commissions.reduce((sum, c) => sum + (c.gci || 0), 0)
+  const avgCommission = commissions.length > 0 ? totalGCI / commissions.length : 0
 
   return (
     <div className="space-y-6">
@@ -152,7 +119,7 @@ export default function CommissionsPage() {
               <div>
                 <p className="text-sm text-zinc-400">Total GCI (MTD)</p>
                 <p className="text-2xl font-bold text-white">
-                  {formatCurrency(totalGCI)}
+                  {loading ? "..." : formatCurrency(totalGCI)}
                 </p>
               </div>
               <div className="rounded-lg bg-blue-500/20 p-2">
@@ -165,9 +132,9 @@ export default function CommissionsPage() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-zinc-400">Paid Out</p>
+                <p className="text-sm text-zinc-400">Paid (MTD)</p>
                 <p className="text-2xl font-bold text-emerald-400">
-                  {formatCurrency(totalPaid)}
+                  {loading ? "..." : formatCurrency(totalPaid)}
                 </p>
               </div>
               <div className="rounded-lg bg-emerald-500/20 p-2">
@@ -182,7 +149,7 @@ export default function CommissionsPage() {
               <div>
                 <p className="text-sm text-zinc-400">Pending</p>
                 <p className="text-2xl font-bold text-amber-400">
-                  {formatCurrency(totalPending)}
+                  {loading ? "..." : formatCurrency(totalPending)}
                 </p>
               </div>
               <div className="rounded-lg bg-amber-500/20 p-2">
@@ -195,9 +162,9 @@ export default function CommissionsPage() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-zinc-400">Avg Commission</p>
+                <p className="text-sm text-zinc-400">Avg. Commission</p>
                 <p className="text-2xl font-bold text-white">
-                  {formatCurrency(avgCommission)}
+                  {loading ? "..." : formatCurrency(avgCommission)}
                 </p>
               </div>
               <div className="rounded-lg bg-purple-500/20 p-2">
@@ -233,77 +200,122 @@ export default function CommissionsPage() {
 
       {/* Commissions Table */}
       <Card className="border-zinc-800 bg-zinc-900/50">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Agent</TableHead>
-              <TableHead>Transaction</TableHead>
-              <TableHead>GCI</TableHead>
-              <TableHead>Split</TableHead>
-              <TableHead>Agent Commission</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Date Paid</TableHead>
-              <TableHead>QB Invoice</TableHead>
-              <TableHead className="w-[50px]"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredCommissions.map((comm) => (
-              <TableRow key={comm.id}>
-                <TableCell>
-                  <div className="flex items-center gap-3">
-                    <Avatar fallback={getInitials(comm.agent)} size="sm" />
-                    <span className="font-medium text-zinc-200">{comm.agent}</span>
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="flex items-center justify-center p-12">
+              <Loader2 className="h-8 w-8 animate-spin text-zinc-400" />
+            </div>
+          ) : commissions.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-zinc-400">No commission payments found</p>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between border-b border-zinc-800 p-4">
+                <div className="text-sm text-zinc-400">
+                  Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, total)} of {total} payments
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-zinc-400">Show:</span>
+                  <Select
+                    options={[
+                      { value: "10", label: "10" },
+                      { value: "25", label: "25" },
+                      { value: "50", label: "50" },
+                      { value: "100", label: "100" },
+                    ]}
+                    value={pageSize.toString()}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    className="w-20"
+                  />
+                </div>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Agent</TableHead>
+                    <TableHead>Transaction</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>GCI</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Date Paid</TableHead>
+                    <TableHead className="w-[50px]"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {commissions.map((comm) => (
+                    <TableRow
+                      key={comm.id}
+                      className="cursor-pointer hover:bg-zinc-800/50"
+                      onClick={() => router.push(`/commissions/${comm.id}`)}
+                    >
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <Avatar fallback={getInitials(comm.agent)} size="sm" />
+                          <span className="font-medium text-zinc-200">{comm.agent}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-zinc-300">{comm.transaction}</span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-semibold text-white">
+                          {comm.amount ? formatCurrency(comm.amount) : "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-zinc-400">
+                          {comm.gci ? formatCurrency(comm.gci) : "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={comm.status === "PAID" ? "default" : "secondary"}>
+                          {comm.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-zinc-400">
+                          {comm.datePaid ? formatDate(comm.datePaid) : "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Button variant="ghost" size="icon">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between border-t border-zinc-800 p-4">
+                  <div className="text-sm text-zinc-400">
+                    Page {currentPage} of {totalPages}
                   </div>
-                </TableCell>
-                <TableCell>
-                  <span className="text-zinc-300">{comm.transaction}</span>
-                </TableCell>
-                <TableCell>
-                  <span className="text-zinc-300">{formatCurrency(comm.gci)}</span>
-                </TableCell>
-                <TableCell>
-                  <span className="text-zinc-400">{comm.splitPct}%</span>
-                </TableCell>
-                <TableCell>
-                  <span className="font-semibold text-emerald-400">
-                    {formatCurrency(comm.amount)}
-                  </span>
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    variant={comm.status === "PAID" ? "success" : "warning"}
-                  >
-                    {comm.status}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  {comm.datePaid ? (
-                    <span className="text-zinc-400">{formatDate(comm.datePaid)}</span>
-                  ) : (
-                    <span className="text-zinc-600">—</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {comm.qbInvoiceId ? (
-                    <span className="font-mono text-sm text-zinc-400">
-                      {comm.qbInvoiceId}
-                    </span>
-                  ) : (
-                    <span className="text-zinc-600">—</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <Button variant="ghost" size="icon">
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                      disabled={currentPage === totalPages}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
       </Card>
     </div>
   )
 }
-

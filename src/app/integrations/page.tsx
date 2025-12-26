@@ -1,5 +1,6 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { 
   Webhook, 
   RefreshCw, 
@@ -8,12 +9,22 @@ import {
   Clock,
   ExternalLink,
   Copy,
-  Settings
+  Settings,
+  MoreHorizontal
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import * as React from "react"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 
 const integrations = [
   {
@@ -81,16 +92,24 @@ const webhookEndpoints = [
   },
 ]
 
-const recentSyncs = [
-  { type: "Agent", name: "Sarah Johnson", status: "success", time: "2 min ago" },
-  { type: "Transaction", name: "123 Oak Street", status: "success", time: "5 min ago" },
-  { type: "Listing", name: "456 Maple Ave", status: "success", time: "8 min ago" },
-  { type: "Agent", name: "Michael Chen", status: "failed", time: "12 min ago" },
-  { type: "Transaction", name: "789 Cedar Lane", status: "success", time: "15 min ago" },
-]
+// Recent syncs removed - can be fetched from API if needed
+const recentSyncs: any[] = []
 
 export default function IntegrationsPage() {
-  const baseUrl = typeof window !== "undefined" ? window.location.origin : "https://your-domain.com"
+  const [baseUrl, setBaseUrl] = useState("")
+  const [pageSize, setPageSize] = useState(10)
+  const [currentPage, setCurrentPage] = useState(1)
+
+  useEffect(() => {
+    // Set baseUrl only on client side after mount to avoid hydration mismatch
+    setBaseUrl(window.location.origin)
+  }, [])
+
+  // Pagination for recent syncs (empty for now, can fetch from API)
+  const totalPages = Math.max(1, Math.ceil(recentSyncs.length / pageSize))
+  const startIndex = (currentPage - 1) * pageSize
+  const endIndex = startIndex + pageSize
+  const paginatedSyncs: any[] = recentSyncs.slice(startIndex, endIndex)
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -211,28 +230,87 @@ export default function IntegrationsPage() {
           </Button>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {recentSyncs.map((sync, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between rounded-lg border border-zinc-800/50 bg-zinc-900/30 p-3"
+          <div className="flex items-center justify-between border-b border-zinc-800 pb-4 mb-4">
+            <div className="text-sm text-zinc-400">
+              Showing {startIndex + 1}-{Math.min(endIndex, recentSyncs.length)} of {recentSyncs.length} syncs
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-zinc-400">Show:</span>
+              <select
+                value={pageSize.toString()}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="flex h-10 w-20 appearance-none rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-2 pr-10 text-sm text-zinc-100 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/50"
               >
-                <div className="flex items-center gap-3">
-                  {sync.status === "success" ? (
-                    <CheckCircle className="h-5 w-5 text-emerald-400" />
-                  ) : (
-                    <XCircle className="h-5 w-5 text-red-400" />
-                  )}
-                  <div>
-                    <p className="text-sm text-zinc-200">
-                      <span className="text-zinc-400">{sync.type}:</span> {sync.name}
-                    </p>
-                  </div>
-                </div>
-                <span className="text-xs text-zinc-500">{sync.time}</span>
-              </div>
-            ))}
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
           </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Status</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Time</TableHead>
+                <TableHead className="w-[50px]"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {paginatedSyncs.map((sync, i) => (
+                <TableRow key={i} className="cursor-pointer">
+                  <TableCell>
+                    {sync.status === "success" ? (
+                      <CheckCircle className="h-5 w-5 text-emerald-400" />
+                    ) : (
+                      <XCircle className="h-5 w-5 text-red-400" />
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-zinc-300">{sync.type}</span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-zinc-200">{sync.name}</span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-sm text-zinc-500">{sync.time}</span>
+                  </TableCell>
+                  <TableCell>
+                    <Button variant="ghost" size="icon">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-zinc-800 pt-4 mt-4">
+              <div className="text-sm text-zinc-400">
+                Page {currentPage} of {totalPages}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

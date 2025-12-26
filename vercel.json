@@ -1,0 +1,29 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/rezen-sync",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/rezen-agents",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/rezen-listings?group=open",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/rezen-listings?group=closed",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/rezen-listings?group=terminated",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/rezen-pending",
+      "schedule": "*/45 * * * *"
+    }
+  ]
+}
+

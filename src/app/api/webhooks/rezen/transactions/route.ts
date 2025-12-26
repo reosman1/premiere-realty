@@ -68,31 +68,54 @@ async function upsertTransaction(data: any) {
   }
 
   const transactionData = {
+    rezenId: data.rezenId || data.id,
     brokerTransactionId: data.brokerTransactionId || data.id,
     brokerTransactionCode: data.brokerTransactionCode || data.code,
+    transactionCode: data.transactionCode || data.code,
     
-    name: data.name || data.transactionName || data.address,
+    name: data.name || data.transactionName || data.address?.oneLine || data.address,
     email: data.email,
-    amount: data.amount || data.salePrice,
+    amount: data.amount || data.salePrice || data.price?.amount,
     
-    type: mapTransactionType(data.type),
-    stage: mapTransactionStage(data.stage || data.status),
-    status: data.status,
+    type: mapTransactionType(data.type || data.transactionType),
+    stage: mapTransactionStage(data.stage || data.status || data.lifecycleState?.state),
+    status: data.status || data.lifecycleState?.state,
     statusDetails: data.statusDetails,
+    lifecycleState: data.lifecycleState?.state || data.lifecycleState,
     brokerDealType: data.brokerDealType === "Lease" ? "LEASE" : "SALE",
     
     // Commission
     commissionPct: data.commissionPct || data.commission,
     commissionFlatFee: data.commissionFlatFee,
-    grossCommissionGCI: data.gci || data.grossCommissionGCI,
+    grossCommissionGCI: data.gci || data.grossCommissionGCI || data.grossCommission?.amount,
+    grossCommissionAmount: data.grossCommission?.amount,
+    grossCommissionPercentage: data.grossCommissionPercentage,
+    agentSplitPercent: data.agentSplitPercent,
+    brokerCompanyCommission: data.brokerCompanyCommission,
     firmAdminFee: data.firmAdminFee,
+    
+    // QuickBooks
+    quickbooksId: data.quickbooksId || data.qbId,
+    quickbooksTransactionName: data.quickbooksTransactionName || data.qbTransactionName,
+    quickbooksInvoiceLink: data.quickbooksInvoiceLink || data.qbInvoiceLink,
     
     // Dates
     contractAcceptanceDate: data.contractAcceptanceDate ? new Date(data.contractAcceptanceDate) : undefined,
-    estimatedClosingDate: data.estimatedClosingDate ? new Date(data.estimatedClosingDate) : undefined,
-    actualClosingDate: data.actualClosingDate ? new Date(data.actualClosingDate) : undefined,
+    estimatedClosingDate: data.estimatedClosingDate || data.closingDateEstimated ? new Date(data.estimatedClosingDate || data.closingDateEstimated) : undefined,
+    actualClosingDate: data.actualClosingDate || data.closingDateActual ? new Date(data.actualClosingDate || data.closingDateActual) : undefined,
     
-    // Payer Info
+    // Address
+    addressOneLine: data.address?.oneLine || data.addressOneLine,
+    streetAddress: data.address?.street || data.streetAddress,
+    city: data.address?.city || data.city,
+    state: data.address?.state || data.state,
+    zipCode: data.address?.zipCode || data.zipCode,
+    county: data.address?.county || data.county,
+    country: data.address?.country || data.country,
+    
+    // CD Payer Info (Title/Escrow)
+    cdPayerName: data.cdPayerName || data.cdPayer?.fullName,
+    cdPayerBusinessEntity: data.cdPayerBusinessEntity || data.cdPayerBusinessEntity?.name,
     payerName: data.payerName,
     payerEmail: data.payerEmail,
     payerPhone: data.payerPhone,
@@ -102,14 +125,15 @@ async function upsertTransaction(data: any) {
     personalDeal: data.personalDeal || false,
     firmOwnedLead: data.firmOwnedLead || false,
     haltSyncWithBroker: data.haltSyncWithBroker || false,
+    disableSplitAutomation: data.disableSplitAutomation || false,
     
     // Links
     brokerListingLink: data.brokerListingLink,
-    brokerTransactionLink: data.brokerTransactionLink,
+    brokerTransactionLink: data.brokerTransactionLink || (data.id ? `https://bolt.therealbrokerage.com/transactions/${data.id}/detail` : undefined),
     
     // Source
     leadSource: data.leadSource,
-    office: data.office,
+    office: data.office || data.office?.name,
     
     // Agent relationship
     agentId,

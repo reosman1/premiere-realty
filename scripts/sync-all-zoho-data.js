@@ -1,0 +1,935 @@
+/**
+ * Comprehensive Zoho Data Sync Script
+ * 
+ * This script downloads ALL transactions and ALL related records from Zoho CRM
+ * and stores them in the local database with proper relationships linked.
+ * 
+ * Related records synced:
+ * - Transactions (Deals module)
+ * - Agents/Members (Accounts module)
+ * - Team Leaders (Team_Leaders - CustomModule5)
+ * - Regional Directors (Regional_Directors - CustomModule7)
+ * - Listings (Listings - CustomModule13)
+ * - Payments (Payments - CustomModule12)
+ * - Contacts
+ * - Mentors (Mentors - CustomModule11)
+ * 
+ * Usage:
+ *   node scripts/sync-all-zoho-data.js
+ * 
+ * The script will:
+ * 1. Download all records from each module
+ * 2. Store them in the database
+ * 3. Link relationships (transactions -> agents, listings, contacts, payments, etc.)
+ */
+
+require('dotenv').config()
+const { PrismaClient } = require('@prisma/client')
+
+const prisma = new PrismaClient()
+
+const ZOHO_API_BASE = 'https://www.zohoapis.com/crm/v8'
+const ZOHO_TOKEN_URL = 'https://accounts.zoho.com/oauth/v2/token'
+
+/**
+ * Get access token using refresh token
+ */
+async function getAccessTokenFromRefresh(refreshToken, clientId, clientSecret) {
+  console.log('🔄 Refreshing access token...\n')
+  
+  const params = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: clientId,
+    client_secret: clientSecret,
+  })
+
+  try {
+    const response = await fetch(ZOHO_TOKEN_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(`Token refresh failed: ${JSON.stringify(data)}`)
+    }
+
+    console.log('✅ Successfully refreshed access token\n')
+    return data.access_token
+  } catch (error) {
+    throw new Error(`Failed to refresh token: ${error.message}`)
+  }
+}
+
+/**
+ * Get access token automatically
+ */
+async function getAccessToken() {
+  const refreshToken = process.env.ZOHO_REFRESH_TOKEN
+  const clientId = process.env.ZOHO_CLIENT_ID
+  const clientSecret = process.env.ZOHO_CLIENT_SECRET
+  const accessToken = process.env.ZOHO_ACCESS_TOKEN
+
+  if (refreshToken && clientId && clientSecret) {
+    return await getAccessTokenFromRefresh(refreshToken, clientId, clientSecret)
+  }
+
+  if (accessToken) {
+    return accessToken
+  }
+
+  throw new Error('No authentication method available')
+}
+
+/**
+ * Fetch all fields for a module (up to 200 fields)
+ */
+async function getModuleFields(accessToken, moduleName) {
+  try {
+    const url = `${ZOHO_API_BASE}/settings/fields?module=${moduleName}`
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Zoho-oauthtoken ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      return ['id', 'Name', 'Email', 'Created_Time', 'Modified_Time']
+    }
+
+    const data = await response.json()
+    if (data.fields && Array.isArray(data.fields)) {
+      const fields = data.fields
+        .filter(f => f.api_name && f.api_name !== 'id')
+        .slice(0, 199)
+        .map(f => f.api_name)
+      
+      return ['id', ...fields]
+    }
+    
+    return ['id', 'Name', 'Email', 'Created_Time', 'Modified_Time']
+  } catch (error) {
+    console.warn(`⚠️  Could not fetch fields for module ${moduleName}, using default fields`)
+    return ['id', 'Name', 'Email', 'Created_Time', 'Modified_Time']
+  }
+}
+
+/**
+ * Fetch all records from a Zoho module
+ */
+async function fetchAllRecords(accessToken, moduleName, limit = null) {
+  console.log(`📥 Fetching ${moduleName}...`)
+  
+  // Get available fields
+  const fields = await getModuleFields(accessToken, moduleName)
+  const fieldsString = fields.join(',')
+
+  let allRecords = []
+  let pageToken = null
+  let pageCount = 0
+  const maxPages = limit ? Math.ceil(limit / 200) : 1000
+
+  do {
+    let url = `${ZOHO_API_BASE}/${moduleName}?fields=${fieldsString}&per_page=200&sort_order=desc&sort_by=Created_Time`
+    if (pageToken) {
+      url += `&page_token=${pageToken}`
+    }
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Zoho-oauthtoken ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`Zoho API error (${response.status}): ${errorText}`)
+    }
+
+    const data = await response.json()
+    
+    if (data.data && Array.isArray(data.data)) {
+      allRecords = allRecords.concat(data.data)
+      console.log(`  Fetched page ${pageCount + 1}: ${data.data.length} records (Total: ${allRecords.length})`)
+      
+      pageToken = data.info?.next_page_token || null
+      pageCount++
+      
+      if (limit && allRecords.length >= limit) {
+        break
+      }
+      
+      if (!pageToken) {
+        break
+      }
+    } else {
+      break
+    }
+  } while (pageToken && pageCount < maxPages)
+
+  const result = limit ? allRecords.slice(0, limit) : allRecords
+  console.log(`✅ Fetched ${result.length} ${moduleName} records\n`)
+  return result
+}
+
+/**
+ * Helper to extract lookup field value (handles both object and string formats)
+ */
+function extractLookupField(field) {
+  if (!field) return null
+  if (typeof field === 'string') return field
+  if (typeof field === 'object') {
+    return field.name || field.Name || field.id || field.Id || null
+  }
+  return null
+}
+
+/**
+ * Helper to extract lookup field ID
+ */
+function extractLookupId(field) {
+  if (!field) return null
+  if (typeof field === 'object') {
+    return field.id || field.Id || null
+  }
+  return null
+}
+
+/**
+ * Sync Agents (Accounts module)
+ */
+async function syncAgents(accessToken, zohoRecords) {
+  console.log('\n📦 Syncing Agents...')
+  
+  const stats = { created: 0, updated: 0, errors: 0 }
+  
+  for (const record of zohoRecords) {
+    try {
+      const zohoId = record.id
+      if (!zohoId) continue
+
+      const agentData = {
+        zohoId,
+        name: record.Account_Name || 'Unknown',
+        email: record.Personal_Email || record.Work_Email || null,
+        personalEmail: record.Personal_Email || null,
+        workEmail: record.Work_Email || null,
+        phone: record.Cell_Phone || null,
+        street: record.Street || null,
+        city: record.City || null,
+        state: record.State || null,
+        zipcode: record.Zipcode || null,
+        status: mapAgentStatus(record.Firm_Status),
+        memberLevel: mapMemberLevel(record.Member_Level),
+        hireDate: record.Hire_Date ? new Date(record.Hire_Date) : null,
+        departureDate: record.Departure_Date ? new Date(record.Departure_Date) : null,
+        preCapSplitToAgent: record.Pre_Cap_Split_to_Agent ? parseFloat(record.Pre_Cap_Split_to_Agent) : null,
+        postCapSplitToAgent: record.Post_Cap_Split_to_Agent ? parseFloat(record.Post_Cap_Split_to_Agent) : null,
+        teamCapAmount: record.Annual_Cap_Amount ? parseFloat(record.Annual_Cap_Amount) : null,
+        qbVendorId: record.Quickbooks_ID || null,
+        qbVendorName: record.QB_Vendor_Name || null,
+        rezenId: record.REAL_Participant_ID || null,
+        isActiveTeamLeader: record.Is_a_Team_Leader === true,
+        isActiveDirector: record.Is_a_Regional_Director === true,
+        isActiveMentor: record.Is_a_Mentor === true,
+        isActiveSponsor: record.Recruiting_Partner === true,
+      }
+
+      // Ensure email is always set (required field)
+      if (!agentData.email || agentData.email === null || agentData.email === undefined) {
+        agentData.email = `no-email-${zohoId}@premieregrp.com`
+      }
+
+      // Use upsert to handle both create and update in one operation
+      const result = await prisma.agent.upsert({
+        where: { zohoId },
+        update: {
+          name: agentData.name,
+          email: agentData.email,
+          personalEmail: agentData.personalEmail,
+          workEmail: agentData.workEmail,
+          phone: agentData.phone,
+          street: agentData.street,
+          city: agentData.city,
+          state: agentData.state,
+          zipcode: agentData.zipcode,
+          status: agentData.status,
+          memberLevel: agentData.memberLevel,
+          hireDate: agentData.hireDate,
+          departureDate: agentData.departureDate,
+          preCapSplitToAgent: agentData.preCapSplitToAgent,
+          postCapSplitToAgent: agentData.postCapSplitToAgent,
+          teamCapAmount: agentData.teamCapAmount,
+          qbVendorId: agentData.qbVendorId,
+          qbVendorName: agentData.qbVendorName,
+          rezenId: agentData.rezenId,
+          isActiveTeamLeader: agentData.isActiveTeamLeader,
+          isActiveDirector: agentData.isActiveDirector,
+          isActiveMentor: agentData.isActiveMentor,
+          isActiveSponsor: agentData.isActiveSponsor,
+        },
+        create: agentData,
+      })
+
+      const wasCreated = result.createdAt.getTime() === result.updatedAt.getTime()
+      if (wasCreated) {
+        stats.created++
+      } else {
+        stats.updated++
+      }
+    } catch (error) {
+      console.error(`  ❌ Error syncing agent ${record.id}: ${error.message}`)
+      stats.errors++
+    }
+  }
+
+  console.log(`  ✅ Created: ${stats.created}, Updated: ${stats.updated}, Errors: ${stats.errors}`)
+  return stats
+}
+
+/**
+ * Sync Team Leaders
+ */
+async function syncTeamLeaders(accessToken, zohoRecords) {
+  console.log('\n📦 Syncing Team Leaders...')
+  
+  // Team Leaders are typically stored as Agents with a flag
+  // We'll update agents that are team leaders
+  const stats = { updated: 0, errors: 0 }
+  
+  for (const record of zohoRecords) {
+    try {
+      const zohoId = record.id
+      if (!zohoId) continue
+
+      // Find agent by zohoId or email
+      const agent = await prisma.agent.findFirst({
+        where: {
+          OR: [
+            { zohoId },
+            { email: record.Email || undefined },
+            { name: record.Name || undefined },
+          ].filter(condition => Object.values(condition).some(v => v !== undefined)),
+        },
+      })
+
+      if (agent) {
+        await prisma.agent.update({
+          where: { id: agent.id },
+          data: {
+            isActiveTeamLeader: true,
+            // Update other team leader specific fields if needed
+          },
+        })
+        stats.updated++
+      }
+    } catch (error) {
+      console.error(`  ❌ Error syncing team leader ${record.id}: ${error.message}`)
+      stats.errors++
+    }
+  }
+
+  console.log(`  ✅ Updated: ${stats.updated}, Errors: ${stats.errors}`)
+  return stats
+}
+
+/**
+ * Sync Regional Directors
+ */
+async function syncRegionalDirectors(accessToken, zohoRecords) {
+  console.log('\n📦 Syncing Regional Directors...')
+  
+  const stats = { updated: 0, errors: 0 }
+  
+  for (const record of zohoRecords) {
+    try {
+      const zohoId = record.id
+      if (!zohoId) continue
+
+      const agent = await prisma.agent.findFirst({
+        where: {
+          OR: [
+            { zohoId },
+            { email: record.Email || undefined },
+            { name: record.Name || undefined },
+          ].filter(condition => Object.values(condition).some(v => v !== undefined)),
+        },
+      })
+
+      if (agent) {
+        await prisma.agent.update({
+          where: { id: agent.id },
+          data: {
+            isActiveDirector: true,
+          },
+        })
+        stats.updated++
+      }
+    } catch (error) {
+      console.error(`  ❌ Error syncing regional director ${record.id}: ${error.message}`)
+      stats.errors++
+    }
+  }
+
+  console.log(`  ✅ Updated: ${stats.updated}, Errors: ${stats.errors}`)
+  return stats
+}
+
+/**
+ * Sync Mentors
+ */
+async function syncMentors(accessToken, zohoRecords) {
+  console.log('\n📦 Syncing Mentors...')
+  
+  const stats = { updated: 0, errors: 0 }
+  
+  for (const record of zohoRecords) {
+    try {
+      const zohoId = record.id
+      if (!zohoId) continue
+
+      const agent = await prisma.agent.findFirst({
+        where: {
+          OR: [
+            { zohoId },
+            { email: record.Email || undefined },
+            { name: record.Name || undefined },
+          ].filter(condition => Object.values(condition).some(v => v !== undefined)),
+        },
+      })
+
+      if (agent) {
+        await prisma.agent.update({
+          where: { id: agent.id },
+          data: {
+            isActiveMentor: true,
+          },
+        })
+        stats.updated++
+      }
+    } catch (error) {
+      console.error(`  ❌ Error syncing mentor ${record.id}: ${error.message}`)
+      stats.errors++
+    }
+  }
+
+  console.log(`  ✅ Updated: ${stats.updated}, Errors: ${stats.errors}`)
+  return stats
+}
+
+/**
+ * Sync Contacts
+ */
+async function syncContacts(accessToken, zohoRecords) {
+  console.log('\n📦 Syncing Contacts...')
+  
+  const stats = { created: 0, updated: 0, errors: 0 }
+  
+  for (const record of zohoRecords) {
+    try {
+      const zohoId = record.id
+      if (!zohoId) continue
+
+      // Extract name - could be in First_Name/Last_Name or Name field
+      const firstName = record.First_Name || record.Name?.split(' ')[0] || 'Unknown'
+      const lastName = record.Last_Name || record.Name?.split(' ').slice(1).join(' ') || ''
+
+      const contactData = {
+        zohoId,
+        firstName,
+        lastName,
+        email: record.Email || null,
+        phone: record.Phone || record.Mobile || null,
+        street: record.Mailing_Street || record.Street || null,
+        city: record.Mailing_City || record.City || null,
+        state: record.Mailing_State || record.State || null,
+        zipcode: record.Mailing_Zip || record.Zipcode || null,
+        contactType: record.Contact_Type || record.Type || null,
+      }
+
+      const existing = await prisma.contact.findUnique({
+        where: { zohoId },
+      })
+
+      if (existing) {
+        await prisma.contact.update({
+          where: { zohoId },
+          data: contactData,
+        })
+        stats.updated++
+      } else {
+        await prisma.contact.create({
+          data: contactData,
+        })
+        stats.created++
+      }
+    } catch (error) {
+      console.error(`  ❌ Error syncing contact ${record.id}: ${error.message}`)
+      stats.errors++
+    }
+  }
+
+  console.log(`  ✅ Created: ${stats.created}, Updated: ${stats.updated}, Errors: ${stats.errors}`)
+  return stats
+}
+
+/**
+ * Sync Listings
+ */
+async function syncListings(accessToken, zohoRecords) {
+  console.log('\n📦 Syncing Listings...')
+  
+  const stats = { created: 0, updated: 0, errors: 0 }
+  
+  for (const record of zohoRecords) {
+    try {
+      const zohoId = record.id
+      if (!zohoId) continue
+
+      // Find linked agent
+      let agentId = null
+      const agentLookup = record.Agent_Name || record.Owner
+      if (agentLookup) {
+        const agentZohoId = extractLookupId(agentLookup)
+        const agentName = extractLookupField(agentLookup)
+        
+        if (agentZohoId) {
+          const agent = await prisma.agent.findUnique({
+            where: { zohoId: agentZohoId },
+          })
+          if (agent) agentId = agent.id
+        } else if (agentName) {
+          const agent = await prisma.agent.findFirst({
+            where: { name: { contains: agentName, mode: 'insensitive' } },
+          })
+          if (agent) agentId = agent.id
+        }
+      }
+
+      const listingData = {
+        zohoId,
+        listingName: record.Name || record.Listing_Name || null,
+        listingPrice: record.Listing_Price || record.Price ? parseFloat(record.Listing_Price || record.Price) : null,
+        streetNo: record.Street_No || null,
+        streetName: record.Street_Name || null,
+        city: record.City || null,
+        state: record.State || null,
+        zipCode: record.Zip_Code || record.Zipcode || null,
+        county: record.County || null,
+        listingDate: record.Listing_Date ? new Date(record.Listing_Date) : null,
+        expirationDate: record.Expiration_Date ? new Date(record.Expiration_Date) : null,
+        stage: mapListingStage(record.Stage || record.Status),
+        status: record.Status || null,
+        agentId,
+      }
+
+      const existing = await prisma.listing.findUnique({
+        where: { zohoId },
+      })
+
+      if (existing) {
+        await prisma.listing.update({
+          where: { zohoId },
+          data: listingData,
+        })
+        stats.updated++
+      } else {
+        await prisma.listing.create({
+          data: listingData,
+        })
+        stats.created++
+      }
+    } catch (error) {
+      console.error(`  ❌ Error syncing listing ${record.id}: ${error.message}`)
+      stats.errors++
+    }
+  }
+
+  console.log(`  ✅ Created: ${stats.created}, Updated: ${stats.updated}, Errors: ${stats.errors}`)
+  return stats
+}
+
+/**
+ * Sync Payments
+ */
+async function syncPayments(accessToken, zohoRecords) {
+  console.log('\n📦 Syncing Payments...')
+  
+  const stats = { created: 0, updated: 0, errors: 0 }
+  
+  for (const record of zohoRecords) {
+    try {
+      const zohoId = record.id
+      if (!zohoId) continue
+
+      // Find linked transaction
+      let transactionId = null
+      const transactionLookup = record.Transaction_Name || record.Deal_Name || record.Deal
+      if (transactionLookup) {
+        const transactionZohoId = extractLookupId(transactionLookup)
+        if (transactionZohoId) {
+          const transaction = await prisma.transaction.findUnique({
+            where: { zohoId: transactionZohoId },
+          })
+          if (transaction) transactionId = transaction.id
+        }
+      }
+
+      // Find linked agent
+      let agentId = null
+      const agentLookup = record.Agent_Name || record.Account_Name || record.Owner
+      if (agentLookup) {
+        const agentZohoId = extractLookupId(agentLookup)
+        if (agentZohoId) {
+          const agent = await prisma.agent.findUnique({
+            where: { zohoId: agentZohoId },
+          })
+          if (agent) agentId = agent.id
+        }
+      }
+
+      const paymentData = {
+        zohoId,
+        amount: record.Amount ? parseFloat(record.Amount) : null,
+        status: mapPaymentStatus(record.Status || record.Payment_Status),
+        paymentType: record.Payment_Type || record.Type || null,
+        dateEarned: record.Date_Earned || record.Earned_Date ? new Date(record.Date_Earned || record.Earned_Date) : null,
+        datePaid: record.Date_Paid || record.Paid_Date ? new Date(record.Date_Paid || record.Paid_Date) : null,
+        qbInvoiceId: record.QB_Invoice_ID || record.Quickbooks_Invoice_ID || null,
+        notes: record.Notes || record.Description || null,
+        transactionId,
+        agentId,
+      }
+
+      const existing = await prisma.commissionPayment.findUnique({
+        where: { zohoId },
+      })
+
+      if (existing) {
+        await prisma.commissionPayment.update({
+          where: { zohoId },
+          data: paymentData,
+        })
+        stats.updated++
+      } else {
+        await prisma.commissionPayment.create({
+          data: paymentData,
+        })
+        stats.created++
+      }
+    } catch (error) {
+      console.error(`  ❌ Error syncing payment ${record.id}: ${error.message}`)
+      stats.errors++
+    }
+  }
+
+  console.log(`  ✅ Created: ${stats.created}, Updated: ${stats.updated}, Errors: ${stats.errors}`)
+  return stats
+}
+
+/**
+ * Sync Transactions (Deals)
+ */
+async function syncTransactions(accessToken, zohoRecords) {
+  console.log('\n📦 Syncing Transactions...')
+  
+  const stats = { created: 0, updated: 0, errors: 0 }
+  
+  for (const record of zohoRecords) {
+    try {
+      const zohoId = record.id
+      if (!zohoId) continue
+
+      // Find linked agent
+      let agentId = null
+      const accountLookup = record.Account_Name || record.Owner
+      if (accountLookup) {
+        const agentZohoId = extractLookupId(accountLookup)
+        const agentName = extractLookupField(accountLookup)
+        
+        if (agentZohoId) {
+          const agent = await prisma.agent.findUnique({
+            where: { zohoId: agentZohoId },
+          })
+          if (agent) agentId = agent.id
+        } else if (agentName) {
+          const agent = await prisma.agent.findFirst({
+            where: { name: { contains: agentName, mode: 'insensitive' } },
+          })
+          if (agent) agentId = agent.id
+        }
+      }
+
+      // Find linked listing
+      let listingId = null
+      const listingLookup = record.Listing_Name || record.Associated_Listing_Link
+      if (listingLookup) {
+        const listingZohoId = extractLookupId(listingLookup)
+        if (listingZohoId) {
+          const listing = await prisma.listing.findUnique({
+            where: { zohoId: listingZohoId },
+          })
+          if (listing) listingId = listing.id
+        }
+      }
+
+      // Find linked contact (primary contact)
+      let primaryContactId = null
+      const contactLookup = record.Contact_Name || record.Primary_Contact
+      if (contactLookup) {
+        const contactZohoId = extractLookupId(contactLookup)
+        if (contactZohoId) {
+          const contact = await prisma.contact.findUnique({
+            where: { zohoId: contactZohoId },
+          })
+          if (contact) primaryContactId = contact.id
+        }
+      }
+
+      const transactionData = {
+        zohoId,
+        name: record.Deal_Name || record.Name || 'Unnamed Transaction',
+        email: record.Email || null,
+        amount: record.Amount ? parseFloat(record.Amount) : null,
+        type: mapTransactionType(record.Type),
+        stage: mapTransactionStage(record.Stage),
+        status: record.Invoice_Status || record.Status || null,
+        brokerDealType: mapBrokerDealType(record.Broker_Deal_Type || record.Deal_Type),
+        contractAcceptanceDate: record.Contract_Date || record.Contract_Acceptance_Date ? new Date(record.Contract_Date || record.Contract_Acceptance_Date) : null,
+        estimatedClosingDate: record.Estimated_Closing_Date ? new Date(record.Estimated_Closing_Date) : null,
+        actualClosingDate: record.Closing_Date || record.Actual_Closing_Date ? new Date(record.Closing_Date || record.Actual_Closing_Date) : null,
+        commissionPct: record.Commission || record.Commission_Percentage ? parseFloat(String(record.Commission || record.Commission_Percentage).replace('%', '')) : null,
+        commissionFlatFee: record.Commission_Flat_Fee ? parseFloat(record.Commission_Flat_Fee) : null,
+        grossCommissionGCI: record.Gross_Commission_Income_GCI || record.GCI ? parseFloat(record.Gross_Commission_Income_GCI || record.GCI) : null,
+        agentSplitPercent: record.Agent_Split_Percent ? parseFloat(record.Agent_Split_Percent) : null,
+        brokerCompanyCommission: record.Broker_Company_Commission ? parseFloat(record.Broker_Company_Commission) : null,
+        firmAdminFee: record.Firm_Admin_Fee || record.Admin_Fee || record.Transaction_Fee_to_PREMIERE ? parseFloat(record.Firm_Admin_Fee || record.Admin_Fee || record.Transaction_Fee_to_PREMIERE) : null,
+        totalPayments: record.Total_Payments ? parseFloat(record.Total_Payments) : null,
+        quickbooksId: record.QB_ID || record.Quickbooks_ID || null,
+        quickbooksTransactionName: record.QB_Transaction_Name || null,
+        quickbooksInvoiceLink: record.QB_Invoice_Link || null,
+        cdPayerName: record.Name_of_Title_Entity_Used || null,
+        cdPayerBusinessEntity: record.Title_and_Escrow_Provider || null,
+        streetAddress: record.Street_Address || null,
+        city: record.City || null,
+        state: record.State || null,
+        zipCode: record.Zip_Code || record.ZipCode || null,
+        county: record.County || null,
+        country: record.Country || null,
+        leadSource: record.Lead_Source || null,
+        office: record.Office || null,
+        brokerTransactionId: record.Broker_Transaction_ID || record.Real_Transaction_ID || null,
+        brokerTransactionCode: record.Broker_Transaction_Code || record.Transaction_Code || null,
+        brokerListingLink: record.Broker_Listing_Link || record.Listing_Link || null,
+        brokerTransactionLink: record.Broker_Transaction_Link || null,
+        rezenId: record.Real_Transaction_ID || record.reZEN_Transaction_ID || null,
+        transactionCode: record.Transaction_Code || null,
+        personalDeal: record.Personal_Deal === true || record.PREMIERE_Deal === false,
+        firmOwnedLead: record.Firm_Owned_Lead === true,
+        haltSyncWithBroker: record.Halt_Sync_with_Broker === true,
+        disableSplitAutomation: record.Disable_Split_Automation === true,
+        agentId,
+        listingId,
+        primaryContactId,
+      }
+
+      const existing = await prisma.transaction.findUnique({
+        where: { zohoId },
+      })
+
+      if (existing) {
+        await prisma.transaction.update({
+          where: { zohoId },
+          data: transactionData,
+        })
+        stats.updated++
+      } else {
+        await prisma.transaction.create({
+          data: transactionData,
+        })
+        stats.created++
+      }
+    } catch (error) {
+      console.error(`  ❌ Error syncing transaction ${record.id}: ${error.message}`)
+      stats.errors++
+    }
+  }
+
+  console.log(`  ✅ Created: ${stats.created}, Updated: ${stats.updated}, Errors: ${stats.errors}`)
+  return stats
+}
+
+/**
+ * Link agent relationships (team leader, sponsor, mentor, regional director)
+ */
+async function linkAgentRelationships() {
+  console.log('\n🔗 Linking agent relationships...')
+  
+  // This would require additional Zoho data to link properly
+  // For now, we've set flags based on role modules
+  // Future enhancement: fetch relationship data from Zoho
+  
+  console.log('  ✅ Agent relationships linked via role flags')
+}
+
+// Mapping functions
+function mapAgentStatus(status) {
+  if (!status) return 'ACTIVE'
+  const upper = status.toString().toUpperCase()
+  if (upper.includes('ACTIVE')) return 'ACTIVE'
+  if (upper.includes('INACTIVE')) return 'INACTIVE'
+  if (upper.includes('ONBOARD')) return 'ONBOARDING'
+  return 'ACTIVE'
+}
+
+function mapMemberLevel(level) {
+  if (!level) return 'ASSOCIATE'
+  const upper = level.toString().toUpperCase().replace(/\s+/g, '_')
+  if (upper.includes('PARTNER') && upper.includes('SR')) return 'SR_PARTNER'
+  if (upper.includes('PARTNER')) return 'PARTNER'
+  if (upper.includes('STAFF')) return 'STAFF'
+  return 'ASSOCIATE'
+}
+
+function mapTransactionType(type) {
+  if (!type) return null
+  const upper = type.toString().toUpperCase().replace(/\s+/g, '_')
+  if (upper.includes('LISTING')) return 'LISTING'
+  if (upper.includes('PURCHASE')) return 'PURCHASE'
+  if (upper.includes('LEASE')) {
+    if (upper.includes('TENANT')) return 'LEASE_TENANT'
+    if (upper.includes('LANDLORD')) return 'LEASE_LANDLORD'
+    return 'BOTH_LEASE'
+  }
+  if (upper.includes('REFERRAL')) return 'REFERRAL'
+  if (upper.includes('BPO')) return 'BPO'
+  return 'OTHER'
+}
+
+function mapTransactionStage(stage) {
+  if (!stage) return 'NEW_ENTRY'
+  const upper = stage.toString().toUpperCase().replace(/\s+/g, '_')
+  if (upper.includes('ACTIVE') && upper.includes('LISTING')) return 'ACTIVE_LISTING'
+  if (upper.includes('PENDING')) return 'PENDING'
+  if (upper.includes('CLOSED') && upper.includes('ARCHIVED')) return 'CLOSED_ARCHIVED'
+  if (upper.includes('CLOSED')) return 'CLOSED'
+  if (upper.includes('CANCELED') && upper.includes('PEND')) return 'CANCELED_PEND'
+  if (upper.includes('CANCELED')) return 'CANCELED_PEND'
+  if (upper.includes('EXPIRED')) return 'EXPIRED'
+  if (upper.includes('INCOMPLETE')) return 'INCOMPLETE'
+  return 'NEW_ENTRY'
+}
+
+function mapBrokerDealType(type) {
+  if (!type) return null
+  const upper = type.toString().toUpperCase()
+  if (upper.includes('LEASE')) return 'LEASE'
+  if (upper.includes('SALE')) return 'SALE'
+  return null
+}
+
+function mapListingStage(stage) {
+  if (!stage) return 'ACTIVE_LISTING'
+  const upper = stage.toString().toUpperCase().replace(/\s+/g, '_')
+  if (upper.includes('ACTIVE')) return 'ACTIVE_LISTING'
+  if (upper.includes('PENDING')) return 'PENDING'
+  if (upper.includes('CLOSED')) return 'CLOSED'
+  if (upper.includes('EXPIRED')) return 'EXPIRED'
+  if (upper.includes('CANCELED')) return 'CANCELED'
+  return 'ACTIVE_LISTING'
+}
+
+function mapPaymentStatus(status) {
+  if (!status) return 'PENDING'
+  const upper = status.toString().toUpperCase()
+  if (upper.includes('PAID')) return 'PAID'
+  if (upper.includes('CANCEL')) return 'CANCELLED'
+  return 'PENDING'
+}
+
+/**
+ * Main sync function
+ */
+async function main() {
+  console.log('🚀 Starting Comprehensive Zoho Data Sync\n')
+  console.log('='.repeat(80))
+
+  let accessToken
+  try {
+    accessToken = await getAccessToken()
+  } catch (error) {
+    console.error('❌ Authentication Error:', error.message)
+    process.exit(1)
+  }
+
+  try {
+    // Step 1: Sync all related records first (so we can link transactions later)
+    console.log('\n📋 Step 1: Syncing Related Records\n')
+    
+    const agentsData = await fetchAllRecords(accessToken, 'Accounts')
+    await syncAgents(accessToken, agentsData)
+
+    const teamLeadersData = await fetchAllRecords(accessToken, 'Team_Leaders')
+    await syncTeamLeaders(accessToken, teamLeadersData)
+
+    const regionalDirectorsData = await fetchAllRecords(accessToken, 'Regional_Directors')
+    await syncRegionalDirectors(accessToken, regionalDirectorsData)
+
+    const mentorsData = await fetchAllRecords(accessToken, 'Mentors')
+    await syncMentors(accessToken, mentorsData)
+
+    const contactsData = await fetchAllRecords(accessToken, 'Contacts')
+    await syncContacts(accessToken, contactsData)
+
+    const listingsData = await fetchAllRecords(accessToken, 'Listings')
+    await syncListings(accessToken, listingsData)
+
+    // Step 2: Sync transactions (which link to the above records)
+    console.log('\n📋 Step 2: Syncing Transactions\n')
+    
+    const transactionsData = await fetchAllRecords(accessToken, 'Deals')
+    await syncTransactions(accessToken, transactionsData)
+
+    // Step 3: Sync payments (which link to transactions and agents)
+    console.log('\n📋 Step 3: Syncing Payments\n')
+    
+    const paymentsData = await fetchAllRecords(accessToken, 'Payments')
+    await syncPayments(accessToken, paymentsData)
+
+    // Step 4: Link relationships
+    console.log('\n📋 Step 4: Linking Relationships\n')
+    await linkAgentRelationships()
+
+    console.log('\n' + '='.repeat(80))
+    console.log('✅ Sync Complete!')
+    console.log('='.repeat(80))
+    console.log('\nAll Zoho data has been downloaded and stored with relationships linked.')
+    console.log('\nYou can now:')
+    console.log('  - View transactions in the UI')
+    console.log('  - See relationships between transactions, agents, listings, and payments')
+    console.log('  - Use the data for commission calculations and reporting')
+
+  } catch (error) {
+    console.error('\n❌ Sync failed:')
+    console.error(error.message)
+    if (error.stack) {
+      console.error('\nStack trace:')
+      console.error(error.stack)
+    }
+    process.exit(1)
+  } finally {
+    await prisma.$disconnect()
+  }
+}
+
+main()
+

@@ -71,7 +71,7 @@ tbody tr:hover {
   background: rgb(24 24 27 / 0.8);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-}
+  }
 
 /* Animated gradient border */
 @keyframes gradient-border {

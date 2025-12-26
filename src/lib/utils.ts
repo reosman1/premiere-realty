@@ -38,6 +38,7 @@ export function getInitials(name: string): string {
 }
 
 export function getStatusColor(status: string): string {
+  const statusUpper = status?.toUpperCase() || ""
   const colors: Record<string, string> = {
     ACTIVE: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
     INACTIVE: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30",
@@ -50,7 +51,7 @@ export function getStatusColor(status: string): string {
     NEW_ENTRY: "bg-blue-500/20 text-blue-400 border-blue-500/30",
     ACTIVE_LISTING: "bg-indigo-500/20 text-indigo-400 border-indigo-500/30",
   }
-  return colors[status] || "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
+  return colors[statusUpper] || "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
 }
 
 export function getStageLabel(stage: string): string {

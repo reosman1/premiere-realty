@@ -14,12 +14,19 @@ import {
   ChevronLeft,
   ChevronRight,
   Webhook,
+  Calculator,
+  Crown,
+  Building2,
+  GraduationCap,
 } from "lucide-react"
 import { useState } from "react"
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Team Members", href: "/agents", icon: Users },
+  { name: "Team Leaders", href: "/team-leaders", icon: Crown },
+  { name: "Mentors", href: "/mentors", icon: GraduationCap },
+  { name: "Regional Directors", href: "/regional-directors", icon: Building2 },
   { name: "Listings", href: "/listings", icon: Home },
   { name: "Transactions", href: "/transactions", icon: FileText },
   { name: "Commissions", href: "/commissions", icon: DollarSign },
@@ -27,6 +34,7 @@ const navigation = [
 ]
 
 const bottomNav = [
+  { name: "Formula Fields", href: "/admin/formula-fields", icon: Calculator },
   { name: "Settings", href: "/settings", icon: Settings },
   { name: "Help", href: "/help", icon: HelpCircle },
 ]
